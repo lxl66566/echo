@@ -9,8 +9,14 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 val sdkDir: String = localProps.getProperty("sdk.dir")
-    ?: providers.environmentVariable("ANDROID_HOME").get()
+    ?: providers.environmentVariable("ANDROID_HOME").orNull
+    ?: error("set sdk.dir in local.properties or export ANDROID_HOME")
 val ndkVersion = "30.0.16248370"
+
+// Release signing via env (CI); falls back to the debug key when not configured.
+val releaseKeystore = System.getenv("KEYSTORE_FILE")?.takeIf { file(it).exists() }
+val releaseStorePassword = System.getenv("KEYSTORE_PASSWORD")
+val hasReleaseSigning = releaseKeystore != null && releaseStorePassword != null
 val rustDir = rootProject.projectDir.resolve("rust")
 val jniLibsDir = projectDir.resolve("src/main/jniLibs")
 
@@ -22,10 +28,21 @@ android {
         applicationId = "com.lxl66566.echo"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("VERSION_NAME") ?: "0.1.0"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseKeystore!!)
+                storePassword = releaseStorePassword
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD") ?: releaseStorePassword
+            }
         }
     }
 
@@ -33,6 +50,11 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
